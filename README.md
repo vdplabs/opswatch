@@ -80,6 +80,26 @@ go run ./cmd/opswatch analyze-image \
 
 The vision step converts the image into a normalized `screen` event, then the regular OpsWatch policies decide whether to alert.
 
+## Benchmark Vision Models
+
+Compare local vision models against the same screenshot and context:
+
+```bash
+go run ./cmd/opswatch bench vision \
+  --image examples/r53_dns.png \
+  --models llama3.2-vision,qwen2.5vl,granite3.2-vision \
+  --context-dir examples/context \
+  --runs 3
+```
+
+Use `go run ./cmd/opswatch`, not `go run cmd/opswatch/main.go`. The latter compiles only `main.go` and skips sibling files that contain subcommands.
+
+Useful candidates:
+
+- `qwen2.5vl`: balanced local default for UI, browser, console, and terminal screenshots
+- `granite3.2-vision`: smaller and faster document/OCR-oriented model
+- `llama3.2-vision`: slower fallback
+
 ## Local Context
 
 OpsWatch can read local context packs from `~/.opswatch/context` or a path passed with `--context-dir`. These packs provide incident intent, expected action, protected domains, AWS accounts, service ownership, and runbook hints without sending internal inventory anywhere.

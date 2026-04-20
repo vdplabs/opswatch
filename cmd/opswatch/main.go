@@ -45,6 +45,8 @@ func run(ctx context.Context, args []string) error {
 		return runAnalyze(ctx, args[1:])
 	case "analyze-image":
 		return runAnalyzeImage(ctx, args[1:])
+	case "bench":
+		return runBench(ctx, args[1:])
 	case "context":
 		return runContext(ctx, args[1:])
 	case "doctor":
@@ -62,6 +64,7 @@ func usage() error {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  opswatch analyze --events <events.jsonl> [--context-dir <dir>]")
 	fmt.Fprintln(os.Stderr, "  opswatch analyze-image --image <screenshot.png> [--vision-provider openai|ollama] [--context-dir <dir>]")
+	fmt.Fprintln(os.Stderr, "  opswatch bench vision --image <screenshot.png> --models <m1,m2>")
 	fmt.Fprintln(os.Stderr, "  opswatch context init|inspect|sync [--context-dir <dir>]")
 	fmt.Fprintln(os.Stderr, "  opswatch doctor [--vision-provider openai|ollama]")
 	fmt.Fprintln(os.Stderr, "  opswatch watch [--vision-provider openai|ollama] [--interval 2s] [--context-dir <dir>]")
