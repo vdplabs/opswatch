@@ -17,50 +17,34 @@ Launch the menu bar app:
 
 ```bash
 cd /Users/vishal/go/src/github.com/vdplabs/opswatch/macos/OpsWatchBar
-
-OPSWATCH_ROOT=/Users/vishal/go/src/github.com/vdplabs/opswatch \
-OPSWATCH_VISION_PROVIDER=ollama \
-OPSWATCH_MODEL=llama3.2-vision \
-OPSWATCH_INTERVAL=10s \
-OPSWATCH_MAX_IMAGE_DIMENSION=1000 \
-OPSWATCH_OLLAMA_NUM_PREDICT=128 \
-OPSWATCH_ALERT_COOLDOWN=2m \
-OPSWATCH_MIN_ANALYSIS_INTERVAL=30s \
-OPSWATCH_ENVIRONMENT=prod \
 swift run
 ```
 
 Then:
 
 1. Click `OpsWatch` in the menu bar.
-2. Open `Windows`.
-3. Select the window to watch.
-4. Click `Start Watching`.
+2. Open `Settings...` and confirm the repo root, model, timing, and environment.
+3. Open `Windows`.
+4. Select the window to watch.
+5. Click `Start Watching`.
 
 The log opens automatically and macOS notifications are sent for emitted alerts.
 
 ## Configuration
 
-The app reads configuration from environment variables when it starts.
-
-Required for normal local use:
-
-```bash
-export OPSWATCH_ROOT=/Users/vishal/go/src/github.com/vdplabs/opswatch
-export OPSWATCH_VISION_PROVIDER=ollama
-export OPSWATCH_MODEL=llama3.2-vision
-```
+Use `Settings...` from the menu bar to configure and save values in macOS preferences.
 
 Recommended local performance defaults:
 
-```bash
-export OPSWATCH_INTERVAL=10s
-export OPSWATCH_MAX_IMAGE_DIMENSION=1000
-export OPSWATCH_OLLAMA_NUM_PREDICT=128
-export OPSWATCH_ALERT_COOLDOWN=2m
-export OPSWATCH_MIN_ANALYSIS_INTERVAL=30s
-export OPSWATCH_ENVIRONMENT=prod
-```
+- Repo root: `/Users/vishal/go/src/github.com/vdplabs/opswatch`
+- Vision provider: `ollama`
+- Model: `llama3.2-vision`
+- Interval: `10s`
+- Max image dimension: `1000`
+- Ollama num predict: `128`
+- Alert cooldown: `2m`
+- Min analysis interval: `30s`
+- Environment: `prod`
 
 Optional incident context:
 
@@ -70,7 +54,7 @@ export OPSWATCH_EXPECTED_ACTION="add CNAME record in existing hosted zone"
 export OPSWATCH_PROTECTED_DOMAIN=example.com
 ```
 
-If these are omitted, OpsWatch still watches for high-risk actions such as DNS zone creation and destructive terminal commands.
+You can also enter these optional fields in `Settings...`. If they are omitted, OpsWatch still watches for high-risk actions such as DNS zone creation and destructive terminal commands.
 
 ## Status Indicators
 

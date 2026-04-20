@@ -151,26 +151,17 @@ Launch the menu bar app with local-friendly defaults:
 
 ```bash
 cd /Users/vishal/go/src/github.com/vdplabs/opswatch/macos/OpsWatchBar
-
-OPSWATCH_ROOT=/Users/vishal/go/src/github.com/vdplabs/opswatch \
-OPSWATCH_VISION_PROVIDER=ollama \
-OPSWATCH_MODEL=llama3.2-vision \
-OPSWATCH_INTERVAL=10s \
-OPSWATCH_MAX_IMAGE_DIMENSION=1000 \
-OPSWATCH_OLLAMA_NUM_PREDICT=128 \
-OPSWATCH_MIN_ANALYSIS_INTERVAL=30s \
-OPSWATCH_ALERT_COOLDOWN=2m \
-OPSWATCH_ENVIRONMENT=prod \
 swift run
 ```
 
 Then use the menu bar:
 
 1. Click `OpsWatch`.
-2. Open `Windows`.
-3. Select the browser, terminal, Zoom, or console window to watch.
-4. Click `Start Watching`.
-5. Keep the automatically opened log window visible.
+2. Open `Settings...` and confirm the repo root, model, timing, and environment.
+3. Open `Windows`.
+4. Select the browser, terminal, Zoom, or console window to watch.
+5. Click `Start Watching`.
+6. Keep the automatically opened log window visible.
 
 The menu bar status indicators are:
 
@@ -180,7 +171,7 @@ The menu bar status indicators are:
 - `OpsWatch ●` means watching
 - `OpsWatch !` means attention needed
 
-Optional incident context makes alerts more specific:
+Optional incident context makes alerts more specific. You can set these in `Settings...`:
 
 ```bash
 export OPSWATCH_INTENT="Add a CNAME record for api.example.com"
