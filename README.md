@@ -138,10 +138,57 @@ export OPSWATCH_PROTECTED_DOMAIN=example.com
 
 The macOS companion lives in `macos/OpsWatchBar`. It lists visible windows, lets you select one, and starts/stops OpsWatch from the menu bar.
 
+### Menu Bar Quickstart
+
+Start Ollama and pull the local vision model:
+
 ```bash
-cd macos/OpsWatchBar
-OPSWATCH_ROOT=/Users/vishal/go/src/github.com/vdplabs/opswatch swift run
+ollama serve
+ollama pull llama3.2-vision
 ```
+
+Launch the menu bar app with local-friendly defaults:
+
+```bash
+cd /Users/vishal/go/src/github.com/vdplabs/opswatch/macos/OpsWatchBar
+
+OPSWATCH_ROOT=/Users/vishal/go/src/github.com/vdplabs/opswatch \
+OPSWATCH_VISION_PROVIDER=ollama \
+OPSWATCH_MODEL=llama3.2-vision \
+OPSWATCH_INTERVAL=10s \
+OPSWATCH_MAX_IMAGE_DIMENSION=1000 \
+OPSWATCH_OLLAMA_NUM_PREDICT=128 \
+OPSWATCH_MIN_ANALYSIS_INTERVAL=30s \
+OPSWATCH_ALERT_COOLDOWN=2m \
+OPSWATCH_ENVIRONMENT=prod \
+swift run
+```
+
+Then use the menu bar:
+
+1. Click `OpsWatch`.
+2. Open `Windows`.
+3. Select the browser, terminal, Zoom, or console window to watch.
+4. Click `Start Watching`.
+5. Keep the automatically opened log window visible.
+
+The menu bar status indicators are:
+
+- `OpsWatch` means idle
+- `OpsWatch ◦` means a window is selected
+- `OpsWatch …` means watcher is starting
+- `OpsWatch ●` means watching
+- `OpsWatch !` means attention needed
+
+Optional incident context makes alerts more specific:
+
+```bash
+export OPSWATCH_INTENT="Add a CNAME record for api.example.com"
+export OPSWATCH_EXPECTED_ACTION="add CNAME record in existing hosted zone"
+export OPSWATCH_PROTECTED_DOMAIN=example.com
+```
+
+Without these optional values, OpsWatch still emits baseline high-risk warnings such as DNS zone creation, destructive terminal commands, IAM changes, network edge changes, infra apply/deploy actions, and broad-scope operations.
 
 Logs are written to `/tmp/opswatch-menubar.log`. macOS may require Screen Recording permission for Terminal, Swift, or the packaged app.
 
