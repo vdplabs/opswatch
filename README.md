@@ -39,6 +39,7 @@ This repo currently includes:
 
 ```bash
 go test ./...
+go run ./cmd/opswatch doctor --vision-provider ollama --model llama3.2-vision --repo-root .
 go run ./cmd/opswatch analyze --events examples/dns_incident.jsonl
 ```
 
@@ -158,10 +159,11 @@ Then use the menu bar:
 
 1. Click `OpsWatch`.
 2. Open `Settings...` and confirm the repo root, model, timing, and environment.
-3. Open `Windows`.
-4. Select the browser, terminal, Zoom, or console window to watch.
-5. Click `Start Watching`.
-6. Keep the automatically opened log window visible.
+3. Click `Check Setup` to verify Go, Ollama, the model, and macOS capture tools.
+4. Open `Windows`.
+5. Select the browser, terminal, Zoom, or console window to watch.
+6. Click `Start Watching`.
+7. Keep the automatically opened log window visible.
 
 The menu bar status indicators are:
 

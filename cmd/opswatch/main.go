@@ -18,6 +18,7 @@ import (
 
 	"github.com/vdplabs/opswatch/internal/analyzer"
 	"github.com/vdplabs/opswatch/internal/capture"
+	"github.com/vdplabs/opswatch/internal/doctor"
 	"github.com/vdplabs/opswatch/internal/domain"
 	"github.com/vdplabs/opswatch/internal/framehash"
 	"github.com/vdplabs/opswatch/internal/policy"
@@ -42,6 +43,8 @@ func run(ctx context.Context, args []string) error {
 		return runAnalyze(ctx, args[1:])
 	case "analyze-image":
 		return runAnalyzeImage(ctx, args[1:])
+	case "doctor":
+		return runDoctor(ctx, args[1:])
 	case "watch":
 		return runWatch(ctx, args[1:])
 	case "help", "-h", "--help":
@@ -55,7 +58,46 @@ func usage() error {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  opswatch analyze --events <events.jsonl>")
 	fmt.Fprintln(os.Stderr, "  opswatch analyze-image --image <screenshot.png> [--vision-provider openai|ollama] [--intent <text>]")
+	fmt.Fprintln(os.Stderr, "  opswatch doctor [--vision-provider openai|ollama]")
 	fmt.Fprintln(os.Stderr, "  opswatch watch [--vision-provider openai|ollama] [--interval 2s] [--intent <text>]")
+	return nil
+}
+
+func runDoctor(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	visionProvider := fs.String("vision-provider", "ollama", "vision provider: openai or ollama")
+	model := fs.String("model", "llama3.2-vision", "vision model")
+	ollamaEndpoint := fs.String("ollama-endpoint", "", "Ollama endpoint")
+	repoRoot := fs.String("repo-root", ".", "OpsWatch repository root")
+	format := fs.String("format", "text", "output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	checks := doctor.Run(ctx, doctor.Options{
+		VisionProvider: *visionProvider,
+		Model:          *model,
+		OllamaEndpoint: *ollamaEndpoint,
+		RepoRoot:       *repoRoot,
+	})
+
+	switch *format {
+	case "json":
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(checks); err != nil {
+			return err
+		}
+	case "text":
+		for _, check := range checks {
+			fmt.Fprintf(os.Stdout, "[%s] %s: %s\n", strings.ToUpper(string(check.Status)), check.Name, check.Message)
+		}
+	default:
+		return fmt.Errorf("unsupported format %q", *format)
+	}
+	if doctor.HasFailures(checks) {
+		return fmt.Errorf("doctor found failing checks")
+	}
 	return nil
 }
 

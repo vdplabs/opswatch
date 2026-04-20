@@ -24,15 +24,24 @@ Then:
 
 1. Click `OpsWatch` in the menu bar.
 2. Open `Settings...` and confirm the repo root, model, timing, and environment.
-3. Open `Windows`.
-4. Select the window to watch.
-5. Click `Start Watching`.
+3. Click `Check Setup` to verify Go, Ollama, the model, and macOS capture tools.
+4. Open `Windows`.
+5. Select the window to watch.
+6. Click `Start Watching`.
 
 The log opens automatically and macOS notifications are sent for emitted alerts.
 
 ## Configuration
 
 Use `Settings...` from the menu bar to configure and save values in macOS preferences.
+
+Use `Check Setup` after changing settings. It runs:
+
+```bash
+go run ./cmd/opswatch doctor
+```
+
+and writes the result to `/tmp/opswatch-menubar.log`.
 
 Recommended local performance defaults:
 

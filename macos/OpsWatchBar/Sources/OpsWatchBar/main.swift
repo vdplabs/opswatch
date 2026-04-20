@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var startItem = NSMenuItem(title: "Start Watching", action: #selector(startWatching), keyEquivalent: "s")
     private var stopItem = NSMenuItem(title: "Stop Watching", action: #selector(stopWatching), keyEquivalent: "x")
     private var settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+    private var checkSetupItem = NSMenuItem(title: "Check Setup", action: #selector(checkSetup), keyEquivalent: "d")
     private var logItem = NSMenuItem(title: "Open Log", action: #selector(openLog), keyEquivalent: "l")
     private var statusItemRow = NSMenuItem(title: "Status: idle", action: nil, keyEquivalent: "")
     private let logURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("opswatch-menubar.log")
@@ -58,10 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopItem.target = self
         stopItem.isEnabled = false
         settingsItem.target = self
+        checkSetupItem.target = self
         logItem.target = self
         menu.addItem(startItem)
         menu.addItem(stopItem)
         menu.addItem(settingsItem)
+        menu.addItem(checkSetupItem)
         menu.addItem(logItem)
 
         menu.addItem(.separator())
@@ -197,6 +200,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController = controller
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func checkSetup() {
+        let root = URL(fileURLWithPath: settings.root)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.currentDirectoryURL = root
+        process.arguments = [
+            "go", "run", "./cmd/opswatch", "doctor",
+            "--repo-root", settings.root,
+            "--vision-provider", settings.visionProvider,
+            "--model", settings.model
+        ]
+
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        do {
+            let handle = try FileHandle(forWritingTo: logURL)
+            try handle.seekToEnd()
+            process.standardOutput = handle
+            process.standardError = handle
+            process.terminationHandler = { _ in
+                try? handle.close()
+            }
+            try process.run()
+            NSWorkspace.shared.open(logURL)
+        } catch {
+            selectedItem.title = "Doctor failed: \(error.localizedDescription)"
+            setStatus(.error)
+        }
     }
 
     @objc private func quit() {
