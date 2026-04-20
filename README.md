@@ -150,7 +150,9 @@ ollama serve
 ollama pull llama3.2-vision
 ```
 
-Launch the menu bar app with local-friendly defaults:
+For the easiest path, download `OpsWatchBar-macos.zip` from GitHub Releases, unzip it, and move `OpsWatchBar.app` to `/Applications`. The app bundle includes the `opswatch` CLI, so you do not need a Go checkout for the menu bar app.
+
+For local development, launch the menu bar app with Swift:
 
 ```bash
 cd /Users/vishal/go/src/github.com/vdplabs/opswatch/macos/OpsWatchBar
@@ -160,8 +162,8 @@ swift run
 Then use the menu bar:
 
 1. Click `OpsWatch`.
-2. Open `Settings...` and confirm the repo root, model, timing, and environment.
-3. Click `Check Setup` to verify Go, Ollama, the model, and macOS capture tools.
+2. Open `Settings...` and confirm the model, timing, and environment. The repo root is only used by local `swift run` development builds.
+3. Click `Check Setup` to verify Ollama, the model, and macOS capture tools. Local development builds also verify Go and the repo root.
 4. Open `Windows`.
 5. Select the browser, terminal, Zoom, or console window to watch.
 6. Click `Start Watching`.

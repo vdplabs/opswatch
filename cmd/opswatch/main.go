@@ -68,7 +68,7 @@ func runDoctor(ctx context.Context, args []string) error {
 	visionProvider := fs.String("vision-provider", "ollama", "vision provider: openai or ollama")
 	model := fs.String("model", "llama3.2-vision", "vision model")
 	ollamaEndpoint := fs.String("ollama-endpoint", "", "Ollama endpoint")
-	repoRoot := fs.String("repo-root", ".", "OpsWatch repository root")
+	repoRoot := fs.String("repo-root", "", "OpsWatch repository root; enables source checkout checks")
 	format := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err

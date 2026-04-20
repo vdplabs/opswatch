@@ -35,8 +35,10 @@ type Options struct {
 
 func Run(ctx context.Context, options Options) []Check {
 	var checks []Check
-	checks = append(checks, checkRepoRoot(options.RepoRoot))
-	checks = append(checks, checkExecutable("go"))
+	if options.RepoRoot != "" {
+		checks = append(checks, checkRepoRoot(options.RepoRoot))
+		checks = append(checks, checkExecutable("go"))
+	}
 
 	if runtime.GOOS == "darwin" {
 		checks = append(checks, checkExecutable("screencapture"))
@@ -70,9 +72,6 @@ func HasFailures(checks []Check) bool {
 }
 
 func checkRepoRoot(root string) Check {
-	if root == "" {
-		return Check{Name: "repo root", Status: StatusWarn, Message: "repo root not provided"}
-	}
 	if _, err := os.Stat(root + "/go.mod"); err != nil {
 		return Check{Name: "repo root", Status: StatusFail, Message: "go.mod not found under " + root}
 	}

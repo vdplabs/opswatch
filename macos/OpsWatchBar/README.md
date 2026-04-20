@@ -13,7 +13,9 @@ ollama serve
 ollama pull llama3.2-vision
 ```
 
-Launch the menu bar app:
+For a release install, download `OpsWatchBar-macos.zip`, unzip it, and move `OpsWatchBar.app` to `/Applications`. The release app includes the `opswatch` CLI and does not require Go or a source checkout.
+
+For local development, launch the menu bar app:
 
 ```bash
 cd /Users/vishal/go/src/github.com/vdplabs/opswatch/macos/OpsWatchBar
@@ -23,8 +25,8 @@ swift run
 Then:
 
 1. Click `OpsWatch` in the menu bar.
-2. Open `Settings...` and confirm the repo root, model, timing, and environment.
-3. Click `Check Setup` to verify Go, Ollama, the model, and macOS capture tools.
+2. Open `Settings...` and confirm the model, timing, and environment. The repo root is only used by local `swift run` development builds.
+3. Click `Check Setup` to verify Ollama, the model, and macOS capture tools. Local development builds also verify Go and the repo root.
 4. Open `Windows`.
 5. Select the window to watch.
 6. Click `Start Watching`.
@@ -38,14 +40,14 @@ Use `Settings...` from the menu bar to configure and save values in macOS prefer
 Use `Check Setup` after changing settings. It runs:
 
 ```bash
-go run ./cmd/opswatch doctor
+opswatch doctor
 ```
 
-and writes the result to `/tmp/opswatch-menubar.log`.
+from the bundled CLI in release builds, or `go run ./cmd/opswatch doctor` in local development builds, then writes the result to `/tmp/opswatch-menubar.log`.
 
 Recommended local performance defaults:
 
-- Repo root: `/Users/vishal/go/src/github.com/vdplabs/opswatch`
+- Repo root: `/Users/vishal/go/src/github.com/vdplabs/opswatch` for local development only
 - Vision provider: `ollama`
 - Model: `llama3.2-vision`
 - Interval: `10s`

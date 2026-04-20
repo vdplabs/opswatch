@@ -17,6 +17,13 @@ struct WatchWindow {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private struct LaunchCommand {
+        let executableURL: URL
+        let currentDirectoryURL: URL?
+        let argumentsPrefix: [String]
+        let usesRepoCheckout: Bool
+    }
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let windowsMenu = NSMenu()
@@ -115,12 +122,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         setStatus(.starting)
 
-        let root = URL(fileURLWithPath: settings.root)
+        let command = opswatchCommand()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.currentDirectoryURL = root
-        var arguments = [
-            "go", "run", "./cmd/opswatch", "watch",
+        process.executableURL = command.executableURL
+        process.currentDirectoryURL = command.currentDirectoryURL
+        process.environment = appEnvironment()
+        var arguments = command.argumentsPrefix + [
+            "watch",
             "--vision-provider", settings.visionProvider,
             "--model", settings.model,
             "--interval", settings.interval,
@@ -225,16 +233,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func checkSetup() {
-        let root = URL(fileURLWithPath: settings.root)
+        let command = opswatchCommand()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.currentDirectoryURL = root
-        process.arguments = [
-            "go", "run", "./cmd/opswatch", "doctor",
-            "--repo-root", settings.root,
+        process.executableURL = command.executableURL
+        process.currentDirectoryURL = command.currentDirectoryURL
+        process.environment = appEnvironment()
+        var arguments = command.argumentsPrefix + [
+            "doctor",
             "--vision-provider", settings.visionProvider,
             "--model", settings.model
         ]
+        if command.usesRepoCheckout {
+            arguments += ["--repo-root", settings.root]
+        }
+        process.arguments = arguments
 
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         do {
@@ -251,6 +263,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedItem.title = "Doctor failed: \(error.localizedDescription)"
             setStatus(.error)
         }
+    }
+
+    private func opswatchCommand() -> LaunchCommand {
+        if let bundledCLI = Bundle.main.url(forResource: "opswatch", withExtension: nil),
+           FileManager.default.isExecutableFile(atPath: bundledCLI.path) {
+            return LaunchCommand(
+                executableURL: bundledCLI,
+                currentDirectoryURL: nil,
+                argumentsPrefix: [],
+                usesRepoCheckout: false
+            )
+        }
+
+        return LaunchCommand(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+            currentDirectoryURL: URL(fileURLWithPath: settings.root),
+            argumentsPrefix: ["go", "run", "./cmd/opswatch"],
+            usesRepoCheckout: true
+        )
+    }
+
+    private func appEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let defaultPath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        if let path = environment["PATH"], !path.isEmpty {
+            environment["PATH"] = "\(defaultPath):\(path)"
+        } else {
+            environment["PATH"] = defaultPath
+        }
+        return environment
     }
 
     @objc private func quit() {

@@ -8,7 +8,7 @@ Each tagged release builds:
 
 - `opswatch-darwin-arm64`: CLI for Apple Silicon Macs
 - `opswatch-darwin-amd64`: CLI for Intel Macs
-- `OpsWatchBar-macos.zip`: unsigned macOS menu bar app
+- `OpsWatchBar-macos.zip`: unsigned macOS menu bar app with the `opswatch` CLI bundled inside the app
 - `checksums.txt`: SHA-256 checksums for CLI binaries
 
 ## Create A Release
@@ -38,6 +38,8 @@ The artifact is written to:
 dist/OpsWatchBar-macos.zip
 ```
 
+The package script builds the Swift menu bar app and copies a native `opswatch` CLI into `OpsWatchBar.app/Contents/Resources/opswatch`. Release installs can start watching without a Go checkout.
+
 Build the CLI locally:
 
 ```bash
@@ -48,6 +50,13 @@ GOOS=darwin GOARCH=amd64 go build -o dist/opswatch-darwin-amd64 ./cmd/opswatch
 ## Installing The Menu Bar App
 
 Download `OpsWatchBar-macos.zip`, unzip it, and move `OpsWatchBar.app` to `/Applications`.
+
+Start Ollama and pull the local vision model before watching:
+
+```bash
+ollama serve
+ollama pull llama3.2-vision
+```
 
 The app is currently unsigned and not notarized. macOS may block it on first open. To allow it:
 
