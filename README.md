@@ -139,6 +139,8 @@ export OPSWATCH_PROTECTED_DOMAIN=example.com
 
 The macOS companion lives in `macos/OpsWatchBar`. It lists visible windows, lets you select one, and starts/stops OpsWatch from the menu bar.
 
+Downloadable builds are published from GitHub Releases. See [docs/releases.md](docs/releases.md) for release artifacts and packaging.
+
 ### Menu Bar Quickstart
 
 Start Ollama and pull the local vision model:

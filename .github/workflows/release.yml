@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build Release Artifacts
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Test Go
+        run: go test ./...
+
+      - name: Build CLI artifacts
+        run: |
+          mkdir -p dist
+          GOOS=darwin GOARCH=arm64 go build -o dist/opswatch-darwin-arm64 ./cmd/opswatch
+          GOOS=darwin GOARCH=amd64 go build -o dist/opswatch-darwin-amd64 ./cmd/opswatch
+          (cd dist && shasum -a 256 opswatch-darwin-* > checksums.txt)
+
+      - name: Build menu bar app
+        run: bash scripts/package_macos_app.sh
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opswatch-artifacts
+          path: |
+            dist/opswatch-darwin-arm64
+            dist/opswatch-darwin-amd64
+            dist/OpsWatchBar-macos.zip
+            dist/checksums.txt
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/opswatch-darwin-arm64
+            dist/opswatch-darwin-amd64
+            dist/OpsWatchBar-macos.zip
+            dist/checksums.txt
