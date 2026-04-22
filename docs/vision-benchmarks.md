@@ -5,7 +5,7 @@ OpsWatch can benchmark multiple local vision models against the same screenshot 
 ```bash
 go run ./cmd/opswatch bench vision \
   --image /path/to/screenshot.png \
-  --models llama3.2-vision,qwen2.5vl,granite3.2-vision \
+  --models qwen2.5vl:3b-q4_K_M,qwen2.5vl,granite3.2-vision,llama3.2-vision \
   --context-dir examples/context \
   --runs 3
 ```
@@ -14,7 +14,8 @@ Use the package form, `go run ./cmd/opswatch`. Do not run `go run cmd/opswatch/m
 
 ## Candidate Models
 
-- `qwen2.5vl`: good first choice for operational UI screenshots. Pull with `ollama pull qwen2.5vl`.
+- `qwen2.5vl:3b-q4_K_M`: good first choice for operational UI screenshots. Pull with `ollama pull qwen2.5vl:3b-q4_K_M`.
+- `qwen2.5vl`: higher-cost alternative when the smaller quantized model misses details.
 - `granite3.2-vision`: smaller and often faster for OCR/document-style extraction. Pull with `ollama pull granite3.2-vision`.
 - `llama3.2-vision`: useful fallback, but often slower on laptop workloads.
 

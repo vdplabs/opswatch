@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/vdplabs/opswatch/internal/analyzer"
+	"github.com/vdplabs/opswatch/internal/appleocr"
 	"github.com/vdplabs/opswatch/internal/capture"
 	"github.com/vdplabs/opswatch/internal/contextpack"
 	"github.com/vdplabs/opswatch/internal/doctor"
@@ -25,6 +26,7 @@ import (
 	"github.com/vdplabs/opswatch/internal/framehash"
 	"github.com/vdplabs/opswatch/internal/policy"
 	"github.com/vdplabs/opswatch/internal/report"
+	"github.com/vdplabs/opswatch/internal/terminalscrape"
 	"github.com/vdplabs/opswatch/internal/vision"
 )
 
@@ -145,7 +147,7 @@ func runContextInspect(ctx context.Context, args []string) error {
 func runDoctor(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	visionProvider := fs.String("vision-provider", "ollama", "vision provider: openai or ollama")
-	model := fs.String("model", "llama3.2-vision", "vision model")
+	model := fs.String("model", "qwen2.5vl:3b-q4_K_M", "vision model")
 	ollamaEndpoint := fs.String("ollama-endpoint", "", "Ollama endpoint")
 	repoRoot := fs.String("repo-root", "", "OpsWatch repository root; enables source checkout checks")
 	format := fs.String("format", "text", "output format: text or json")
@@ -236,8 +238,8 @@ func runAnalyzeImage(ctx context.Context, args []string) error {
 	model := fs.String("model", "", "vision model")
 	ollamaEndpoint := fs.String("ollama-endpoint", "", "Ollama generate endpoint")
 	visionTimeout := fs.Duration("vision-timeout", 5*time.Minute, "per-image vision analysis timeout")
-	maxImageDimension := fs.Int("max-image-dimension", 1600, "resize image to this max dimension before analysis; 0 disables")
-	ollamaNumPredict := fs.Int("ollama-num-predict", 256, "maximum Ollama output tokens")
+	maxImageDimension := fs.Int("max-image-dimension", 1000, "resize image to this max dimension before analysis; 0 disables")
+	ollamaNumPredict := fs.Int("ollama-num-predict", 128, "maximum Ollama output tokens")
 	format := fs.String("format", "text", "output format: text or json")
 	showEvents := fs.Bool("show-events", false, "print normalized events before alerts")
 	saveEvents := fs.String("save-events", "", "write normalized events as JSONL")
@@ -268,7 +270,7 @@ func runAnalyzeImage(ctx context.Context, args []string) error {
 		ProtectedDomains: splitCSV(*protectedDomains),
 		Actor:            "local-operator",
 	}, contextEvents)
-	events, err := imageEvents(ctx, imagePathForAnalysis, frame, visionOptions{
+	events, _, err := imageEvents(ctx, imagePathForAnalysis, frame, visionOptions{
 		Provider:         *visionProvider,
 		Model:            *model,
 		OllamaEndpoint:   *ollamaEndpoint,
@@ -403,11 +405,13 @@ func runWatch(ctx context.Context, args []string) error {
 	model := fs.String("model", "", "vision model")
 	ollamaEndpoint := fs.String("ollama-endpoint", "", "Ollama generate endpoint")
 	visionTimeout := fs.Duration("vision-timeout", 5*time.Minute, "per-frame vision analysis timeout")
-	maxImageDimension := fs.Int("max-image-dimension", 1600, "resize captured frames to this max dimension before analysis; 0 disables")
-	ollamaNumPredict := fs.Int("ollama-num-predict", 256, "maximum Ollama output tokens")
+	maxImageDimension := fs.Int("max-image-dimension", 1000, "resize captured frames to this max dimension before analysis; 0 disables")
+	ollamaNumPredict := fs.Int("ollama-num-predict", 128, "maximum Ollama output tokens")
 	captureDir := fs.String("capture-dir", filepath.Join(os.TempDir(), "opswatch-frames"), "directory for temporary captures")
 	captureRectValue := fs.String("capture-rect", "", "capture rectangle as x,y,width,height instead of full screen")
 	windowID := fs.Uint("window-id", 0, "macOS window id to capture instead of full screen")
+	windowOwner := fs.String("window-owner", "", "window owner/app name for selected-window capture")
+	windowTitle := fs.String("window-title", "", "window title for selected-window capture")
 	skipUnchanged := fs.Bool("skip-unchanged", true, "skip vision analysis when the frame looks unchanged")
 	minAnalysisInterval := fs.Duration("min-analysis-interval", 30*time.Second, "minimum time between vision analyses for changed frames")
 	changeThreshold := fs.Int("change-threshold", 4, "minimum visual hash distance needed to analyze a new frame")
@@ -442,12 +446,16 @@ func runWatch(ctx context.Context, args []string) error {
 		Environment:      *environment,
 		ProtectedDomains: splitCSV(*protectedDomains),
 		Actor:            "local-operator",
+		WindowOwner:      *windowOwner,
+		WindowTitle:      *windowTitle,
 	}
 	capturer := capture.MacOSCapture{}
 	var lastHash framehash.Hash
 	hasLastHash := false
 	var lastAnalysisAt time.Time
 	lastAlertAt := make(map[string]time.Time)
+	activeAlertSignatures := make(map[string]bool)
+	fastEventCache := make(map[framehash.Hash]domain.Event)
 	contextEvents, err := contextpack.LoadDir(ctx, *contextDir)
 	if err != nil {
 		return err
@@ -469,12 +477,9 @@ func runWatch(ctx context.Context, args []string) error {
 			return err
 		}
 		captureDuration := time.Since(captureStarted)
-
-		resizeStarted := time.Now()
-		if err := capturer.ResizeMaxDimension(ctx, imagePath, *maxImageDimension); err != nil {
-			fmt.Fprintf(os.Stderr, "opswatch: warning: failed to resize frame: %v\n", err)
-		}
-		resizeDuration := time.Since(resizeStarted)
+		resizeDuration := time.Duration(0)
+		var currentHash framehash.Hash
+		hasCurrentHash := false
 
 		hashDuration := time.Duration(0)
 		if *skipUnchanged {
@@ -483,7 +488,11 @@ func runWatch(ctx context.Context, args []string) error {
 			hashDuration = time.Since(hashStarted)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "opswatch: warning: failed to hash frame: %v\n", err)
-			} else if hasLastHash && framehash.Distance(lastHash, hash) < *changeThreshold {
+			} else {
+				currentHash = hash
+				hasCurrentHash = true
+			}
+			if hasCurrentHash && hasLastHash && framehash.Distance(lastHash, currentHash) < *changeThreshold {
 				if *verbose {
 					fmt.Fprintf(os.Stderr, "opswatch: frame skipped unchanged capture=%s resize=%s hash=%s total=%s\n", captureDuration.Round(time.Millisecond), resizeDuration.Round(time.Millisecond), hashDuration.Round(time.Millisecond), time.Since(frameStarted).Round(time.Millisecond))
 				}
@@ -493,11 +502,82 @@ func runWatch(ctx context.Context, args []string) error {
 				}
 				waitForNextFrame(ctx, *interval)
 				continue
-			} else {
-				lastHash = hash
+			}
+			if hasCurrentHash {
+				lastHash = currentHash
 				hasLastHash = true
 			}
 		}
+
+		fastStarted := time.Now()
+		if fastEvent, mode, ok := fastPathEvent(ctx, imagePath, frame); ok {
+			if hasCurrentHash {
+				fastEventCache[currentHash] = fastEvent
+			}
+			events := append(preludeEvents(frame), fastEvent)
+			events = withContextEvents(contextEvents, events)
+			engine := analyzer.New(policy.DefaultPolicies())
+			alerts, err := engine.AnalyzeEvents(ctx, events)
+			if err != nil {
+				return err
+			}
+			rearmAlertCooldown(alerts, lastAlertAt, activeAlertSignatures)
+			alerts = filterAlertCooldown(alerts, lastAlertAt, *alertCooldown, time.Now())
+			if len(alerts) > 0 {
+				if err := report.WriteText(os.Stdout, alerts); err != nil {
+					cleanupFrame(imagePath, *keepFrames)
+					return err
+				}
+				if *notify {
+					notifyAlerts(alerts)
+				}
+			}
+			lastAnalysisAt = time.Now()
+			fastDuration := time.Since(fastStarted)
+			if *verbose {
+				fmt.Fprintf(os.Stderr, "opswatch: frame analyzed alerts=%d mode=%s capture=%s resize=%s hash=%s analysis=%s total=%s\n", len(alerts), mode, captureDuration.Round(time.Millisecond), resizeDuration.Round(time.Millisecond), hashDuration.Round(time.Millisecond), fastDuration.Round(time.Millisecond), time.Since(frameStarted).Round(time.Millisecond))
+			}
+			cleanupFrame(imagePath, *keepFrames)
+			if *once {
+				return nil
+			}
+			waitForNextFrame(ctx, *interval)
+			continue
+		}
+		if hasCurrentHash {
+			if cachedEvent, ok := fastEventCache[currentHash]; ok {
+				events := append(preludeEvents(frame), cachedEvent)
+				events = withContextEvents(contextEvents, events)
+				engine := analyzer.New(policy.DefaultPolicies())
+				alerts, err := engine.AnalyzeEvents(ctx, events)
+				if err != nil {
+					return err
+				}
+				rearmAlertCooldown(alerts, lastAlertAt, activeAlertSignatures)
+				alerts = filterAlertCooldown(alerts, lastAlertAt, *alertCooldown, time.Now())
+				if len(alerts) > 0 {
+					if err := report.WriteText(os.Stdout, alerts); err != nil {
+						cleanupFrame(imagePath, *keepFrames)
+						return err
+					}
+					if *notify {
+						notifyAlerts(alerts)
+					}
+				}
+				lastAnalysisAt = time.Now()
+				fastDuration := time.Since(fastStarted)
+				if *verbose {
+					fmt.Fprintf(os.Stderr, "opswatch: frame analyzed alerts=%d mode=%s capture=%s resize=%s hash=%s analysis=%s total=%s\n", len(alerts), "apple-ocr-cache", captureDuration.Round(time.Millisecond), resizeDuration.Round(time.Millisecond), hashDuration.Round(time.Millisecond), fastDuration.Round(time.Millisecond), time.Since(frameStarted).Round(time.Millisecond))
+				}
+				cleanupFrame(imagePath, *keepFrames)
+				if *once {
+					return nil
+				}
+				waitForNextFrame(ctx, *interval)
+				continue
+			}
+		}
+
 		if !lastAnalysisAt.IsZero() && time.Since(lastAnalysisAt) < *minAnalysisInterval {
 			if *verbose {
 				fmt.Fprintf(os.Stderr, "opswatch: frame skipped throttle capture=%s resize=%s hash=%s since_last_analysis=%s total=%s\n", captureDuration.Round(time.Millisecond), resizeDuration.Round(time.Millisecond), hashDuration.Round(time.Millisecond), time.Since(lastAnalysisAt).Round(time.Millisecond), time.Since(frameStarted).Round(time.Millisecond))
@@ -510,8 +590,20 @@ func runWatch(ctx context.Context, args []string) error {
 			continue
 		}
 
+		effectiveMaxDimension := *maxImageDimension
+		if terminalscrape.SupportedApp(frame.WindowOwner) && (effectiveMaxDimension == 0 || effectiveMaxDimension > 768) {
+			effectiveMaxDimension = 768
+		}
+		if effectiveMaxDimension > 0 {
+			resizeStarted := time.Now()
+			if err := capturer.ResizeMaxDimension(ctx, imagePath, effectiveMaxDimension); err != nil {
+				fmt.Fprintf(os.Stderr, "opswatch: warning: failed to resize frame: %v\n", err)
+			}
+			resizeDuration = time.Since(resizeStarted)
+		}
+
 		visionStarted := time.Now()
-		events, err := imageEvents(ctx, imagePath, frame, visionOptions{
+		events, mode, err := imageEvents(ctx, imagePath, frame, visionOptions{
 			Provider:         *visionProvider,
 			Model:            *model,
 			OllamaEndpoint:   *ollamaEndpoint,
@@ -523,7 +615,7 @@ func runWatch(ctx context.Context, args []string) error {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "opswatch: warning: frame analysis failed: %v\n", err)
 			if *verbose {
-				fmt.Fprintf(os.Stderr, "opswatch: frame failed capture=%s resize=%s hash=%s vision=%s total=%s\n", captureDuration.Round(time.Millisecond), resizeDuration.Round(time.Millisecond), hashDuration.Round(time.Millisecond), visionDuration.Round(time.Millisecond), time.Since(frameStarted).Round(time.Millisecond))
+				fmt.Fprintf(os.Stderr, "opswatch: frame failed mode=%s capture=%s resize=%s hash=%s analysis=%s total=%s\n", mode, captureDuration.Round(time.Millisecond), resizeDuration.Round(time.Millisecond), hashDuration.Round(time.Millisecond), visionDuration.Round(time.Millisecond), time.Since(frameStarted).Round(time.Millisecond))
 			}
 			cleanupFrame(imagePath, *keepFrames)
 			if *once {
@@ -538,6 +630,7 @@ func runWatch(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		rearmAlertCooldown(alerts, lastAlertAt, activeAlertSignatures)
 		alerts = filterAlertCooldown(alerts, lastAlertAt, *alertCooldown, time.Now())
 		if len(alerts) > 0 {
 			if err := report.WriteText(os.Stdout, alerts); err != nil {
@@ -549,7 +642,7 @@ func runWatch(ctx context.Context, args []string) error {
 			}
 		}
 		if *verbose {
-			fmt.Fprintf(os.Stderr, "opswatch: frame analyzed alerts=%d capture=%s resize=%s hash=%s vision=%s total=%s\n", len(alerts), captureDuration.Round(time.Millisecond), resizeDuration.Round(time.Millisecond), hashDuration.Round(time.Millisecond), visionDuration.Round(time.Millisecond), time.Since(frameStarted).Round(time.Millisecond))
+			fmt.Fprintf(os.Stderr, "opswatch: frame analyzed alerts=%d mode=%s capture=%s resize=%s hash=%s analysis=%s total=%s\n", len(alerts), mode, captureDuration.Round(time.Millisecond), resizeDuration.Round(time.Millisecond), hashDuration.Round(time.Millisecond), visionDuration.Round(time.Millisecond), time.Since(frameStarted).Round(time.Millisecond))
 		}
 		cleanupFrame(imagePath, *keepFrames)
 
@@ -664,6 +757,22 @@ func filterAlertCooldown(alerts []domain.Alert, lastAlertAt map[string]time.Time
 	return filtered
 }
 
+func rearmAlertCooldown(alerts []domain.Alert, lastAlertAt map[string]time.Time, active map[string]bool) {
+	current := make(map[string]bool, len(alerts))
+	for _, alert := range alerts {
+		current[alertSignature(alert)] = true
+	}
+	for signature := range active {
+		if !current[signature] {
+			delete(active, signature)
+			delete(lastAlertAt, signature)
+		}
+	}
+	for signature := range current {
+		active[signature] = true
+	}
+}
+
 func alertSignature(alert domain.Alert) string {
 	return string(alert.Severity) + "|" + alert.Title + "|" + strings.Join(alert.Evidence, "|")
 }
@@ -676,7 +785,27 @@ type visionOptions struct {
 	OllamaNumPredict int
 }
 
-func imageEvents(ctx context.Context, imagePath string, frame vision.FrameContext, options visionOptions) ([]domain.Event, error) {
+func imageEvents(ctx context.Context, imagePath string, frame vision.FrameContext, options visionOptions) ([]domain.Event, string, error) {
+	events := preludeEvents(frame)
+
+	if fastEvent, mode, ok := fastPathEvent(ctx, imagePath, frame); ok {
+		events = append(events, fastEvent)
+		return events, mode, nil
+	}
+
+	client, err := newVisionClient(options)
+	if err != nil {
+		return nil, "vision", err
+	}
+	screenEvent, err := client.AnalyzeImage(ctx, imagePath, frame)
+	if err != nil {
+		return nil, "vision", err
+	}
+	events = append(events, screenEvent)
+	return events, "vision", nil
+}
+
+func preludeEvents(frame vision.FrameContext) []domain.Event {
 	events := make([]domain.Event, 0, 3+len(frame.ProtectedDomains))
 	now := time.Now().UTC()
 	for _, domainName := range frame.ProtectedDomains {
@@ -708,17 +837,26 @@ func imageEvents(ctx context.Context, imagePath string, frame vision.FrameContex
 			Text:      frame.Intent,
 		})
 	}
+	return events
+}
 
-	client, err := newVisionClient(options)
-	if err != nil {
-		return nil, err
+func fastPathEvent(ctx context.Context, imagePath string, frame vision.FrameContext) (domain.Event, string, bool) {
+	ocrCtx, cancelOCR := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelOCR()
+	if ocrEvent, handled, err := appleocr.ExtractEvent(ocrCtx, imagePath, frame); handled {
+		if err == nil {
+			return normalizeOCREvent(ocrEvent, frame), "apple-ocr", true
+		}
 	}
-	screenEvent, err := client.AnalyzeImage(ctx, imagePath, frame)
-	if err != nil {
-		return nil, err
+
+	terminalCtx, cancelTerminal := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancelTerminal()
+	if terminalEvent, handled, err := terminalscrape.ExtractEvent(terminalCtx, frame); handled {
+		if err == nil {
+			return terminalEvent, "terminal", true
+		}
 	}
-	events = append(events, screenEvent)
-	return events, nil
+	return domain.Event{}, "", false
 }
 
 func newVisionClient(options visionOptions) (vision.ImageAnalyzer, error) {
@@ -734,6 +872,74 @@ func newVisionClient(options visionOptions) (vision.ImageAnalyzer, error) {
 	default:
 		return nil, fmt.Errorf("unsupported vision provider %q", options.Provider)
 	}
+}
+
+func normalizeOCREvent(event domain.Event, frame vision.FrameContext) domain.Event {
+	domainName := strings.TrimSpace(strings.ToLower(event.Context["domain"]))
+	if domainName == "" || len(frame.ProtectedDomains) == 0 {
+		return event
+	}
+	best := domainName
+	bestDistance := 99
+	for _, candidate := range frame.ProtectedDomains {
+		candidate = strings.TrimSpace(strings.ToLower(candidate))
+		if candidate == "" {
+			continue
+		}
+		distance := levenshtein(domainName, candidate)
+		if distance < bestDistance {
+			bestDistance = distance
+			best = candidate
+		}
+	}
+	if bestDistance <= 2 && best != domainName {
+		event.Context["domain"] = best
+		event.Text = strings.ReplaceAll(event.Text, domainName, best)
+	}
+	return event
+}
+
+func levenshtein(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			insertCost := curr[j-1] + 1
+			deleteCost := prev[j] + 1
+			replaceCost := prev[j-1] + cost
+			curr[j] = minInt(insertCost, deleteCost, replaceCost)
+		}
+		copy(prev, curr)
+	}
+	return prev[len(b)]
+}
+
+func minInt(values ...int) int {
+	best := values[0]
+	for _, value := range values[1:] {
+		if value < best {
+			best = value
+		}
+	}
+	return best
 }
 
 func resizedImagePath(ctx context.Context, imagePath string, maxDimension int) (string, error) {

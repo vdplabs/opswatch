@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private var fields: [String: NSTextField] = [:]
+    private var profileControl: NSPopUpButton?
     private let onSave: (AppSettings) -> Void
 
     init(settings: AppSettings, onSave: @escaping (AppSettings) -> Void) {
@@ -39,6 +40,7 @@ final class SettingsWindowController: NSWindowController {
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20)
         ])
 
+        addProfilePicker(settings: settings, stack: stack)
         addField("Repo root", key: "root", value: settings.root, stack: stack)
         addField("Vision provider", key: "visionProvider", value: settings.visionProvider, stack: stack)
         addField("Model", key: "model", value: settings.model, stack: stack)
@@ -64,6 +66,38 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(buttonRow)
     }
 
+    private func addProfilePicker(settings: AppSettings, stack: NSStackView) {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+
+        let labelView = NSTextField(labelWithString: "Model profile")
+        labelView.widthAnchor.constraint(equalToConstant: 170).isActive = true
+
+        let popup = NSPopUpButton()
+        popup.translatesAutoresizingMaskIntoConstraints = false
+        popup.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        AppProfile.allCases.forEach { popup.addItem(withTitle: $0.label) }
+        if let profile = AppProfile(rawValue: settings.profile.lowercased()) {
+            popup.selectItem(withTitle: profile.label)
+        } else {
+            popup.selectItem(withTitle: AppProfile.balanced.label)
+        }
+        popup.target = self
+        popup.action = #selector(profileChanged(_:))
+        profileControl = popup
+
+        let hint = NSTextField(labelWithString: "Fast favors responsiveness. Accurate favors richer vision output.")
+        hint.textColor = .secondaryLabelColor
+        hint.lineBreakMode = .byWordWrapping
+
+        row.addArrangedSubview(labelView)
+        row.addArrangedSubview(popup)
+        row.addArrangedSubview(hint)
+        stack.addArrangedSubview(row)
+    }
+
     private func addField(_ label: String, key: String, value: String, stack: NSStackView) {
         let row = NSStackView()
         row.orientation = .horizontal
@@ -83,8 +117,32 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(row)
     }
 
+    @objc private func profileChanged(_ sender: NSPopUpButton) {
+        guard let title = sender.selectedItem?.title,
+              let profile = AppProfile.allCases.first(where: { $0.label == title }) else {
+            return
+        }
+        apply(settings: currentSettings().applying(profile: profile))
+    }
+
     @objc private func save() {
-        let settings = AppSettings(
+        let settings = currentSettings()
+        settings.save()
+        onSave(settings)
+        window?.close()
+    }
+
+    @objc private func closeWindow() {
+        window?.close()
+    }
+
+    private func field(_ key: String) -> String {
+        fields[key]?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func currentSettings() -> AppSettings {
+        AppSettings(
+            profile: selectedProfile().rawValue,
             root: field("root"),
             visionProvider: field("visionProvider"),
             model: field("model"),
@@ -99,16 +157,23 @@ final class SettingsWindowController: NSWindowController {
             expectedAction: field("expectedAction"),
             protectedDomain: field("protectedDomain")
         )
-        settings.save()
-        onSave(settings)
-        window?.close()
     }
 
-    @objc private func closeWindow() {
-        window?.close()
+    private func selectedProfile() -> AppProfile {
+        guard let title = profileControl?.selectedItem?.title,
+              let profile = AppProfile.allCases.first(where: { $0.label == title }) else {
+            return .balanced
+        }
+        return profile
     }
 
-    private func field(_ key: String) -> String {
-        fields[key]?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    private func apply(settings: AppSettings) {
+        profileControl?.selectItem(withTitle: AppProfile(rawValue: settings.profile)?.label ?? AppProfile.balanced.label)
+        fields["visionProvider"]?.stringValue = settings.visionProvider
+        fields["model"]?.stringValue = settings.model
+        fields["interval"]?.stringValue = settings.interval
+        fields["maxImageDimension"]?.stringValue = settings.maxImageDimension
+        fields["ollamaNumPredict"]?.stringValue = settings.ollamaNumPredict
+        fields["minAnalysisInterval"]?.stringValue = settings.minAnalysisInterval
     }
 }

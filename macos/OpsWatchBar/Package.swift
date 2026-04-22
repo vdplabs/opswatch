@@ -6,9 +6,11 @@ let package = Package(
     name: "OpsWatchBar",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "OpsWatchBar", targets: ["OpsWatchBar"])
+        .executable(name: "OpsWatchBar", targets: ["OpsWatchBar"]),
+        .executable(name: "OpsWatchOCR", targets: ["OpsWatchOCR"])
     ],
     targets: [
-        .executableTarget(name: "OpsWatchBar")
+        .executableTarget(name: "OpsWatchBar"),
+        .executableTarget(name: "OpsWatchOCR")
     ]
 )

@@ -36,6 +36,34 @@ func TestFilterAlertCooldown(t *testing.T) {
 	}
 }
 
+func TestRearmAlertCooldownAllowsReturnOfResolvedAlert(t *testing.T) {
+	alert := domain.Alert{
+		Severity: domain.SeverityCritical,
+		Title:    "Protected domain zone creation",
+		Evidence: []string{"observed: Create hosted zone for example.com"},
+	}
+	lastAlertAt := make(map[string]time.Time)
+	active := make(map[string]bool)
+	now := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
+
+	rearmAlertCooldown([]domain.Alert{alert}, lastAlertAt, active)
+	first := filterAlertCooldown([]domain.Alert{alert}, lastAlertAt, time.Hour, now)
+	if len(first) != 1 {
+		t.Fatalf("expected first alert through, got %d", len(first))
+	}
+
+	rearmAlertCooldown(nil, lastAlertAt, active)
+	if len(active) != 0 {
+		t.Fatalf("expected active signatures cleared, got %#v", active)
+	}
+
+	rearmAlertCooldown([]domain.Alert{alert}, lastAlertAt, active)
+	second := filterAlertCooldown([]domain.Alert{alert}, lastAlertAt, time.Hour, now.Add(10*time.Second))
+	if len(second) != 1 {
+		t.Fatalf("expected alert to fire again after disappearing, got %d", len(second))
+	}
+}
+
 func TestParseCaptureRect(t *testing.T) {
 	rect, ok, err := parseCaptureRect("600,0,1440,1000")
 	if err != nil {
@@ -114,6 +142,23 @@ func TestNotificationMessageFallsBackToExplanation(t *testing.T) {
 	alert := domain.Alert{Explanation: "generic explanation"}
 	if got := notificationMessage(alert); got != "generic explanation" {
 		t.Fatalf("unexpected fallback message %q", got)
+	}
+}
+
+func TestNormalizeOCREventCorrectsProtectedDomainTypo(t *testing.T) {
+	event := domain.Event{
+		Text: "Create hosted zone for exatnple.com",
+		Context: map[string]string{
+			"domain": "exatnple.com",
+		},
+	}
+	frame := vision.FrameContext{ProtectedDomains: []string{"example.com"}}
+	got := normalizeOCREvent(event, frame)
+	if got.Context["domain"] != "example.com" {
+		t.Fatalf("expected corrected domain, got %q", got.Context["domain"])
+	}
+	if got.Text != "Create hosted zone for example.com" {
+		t.Fatalf("unexpected normalized text %q", got.Text)
 	}
 }
 

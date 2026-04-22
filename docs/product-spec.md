@@ -69,6 +69,16 @@ The incident surface should split into two views:
 
 The current repo starts at the analyzer boundary, with JSONL events, screenshots, selected-window capture, and local context packs standing in for future adapters.
 
+## Latency Standard
+
+OpsWatch should optimize for warnings that arrive before or during the risky action, not long after it.
+
+That means the product should prefer:
+
+- OCR and structured extraction for text-heavy operational screens
+- terminal-aware parsing for shell workflows
+- VLM fallback only when cheaper extractors cannot confidently normalize the screen
+
 ## Non-Goals
 
 - do not record full meeting video by default

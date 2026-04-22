@@ -13,6 +13,6 @@ OpsWatch is an incident change witness for live operations: it compares observed
 2. Unzip `OpsWatchBar.app` and move it to `/Applications`.
 3. Start Ollama and pull a vision model:
    `ollama serve`
-   `ollama pull qwen2.5vl`
+   `ollama pull qwen2.5vl:3b-q4_K_M`
 4. Open OpsWatch from the menu bar, choose a window, and click `Start Watching`.
 5. Keep the log window visible for the first session while tuning model, interval, and context.

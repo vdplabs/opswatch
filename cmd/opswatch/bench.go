@@ -32,7 +32,7 @@ func runBench(ctx context.Context, args []string) error {
 func runBenchVision(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("bench vision", flag.ContinueOnError)
 	imagePath := fs.String("image", "", "path to screenshot/image")
-	modelsValue := fs.String("models", "qwen2.5vl,granite3.2-vision,llama3.2-vision", "comma-separated vision models")
+	modelsValue := fs.String("models", "qwen2.5vl:3b-q4_K_M,qwen2.5vl,granite3.2-vision,llama3.2-vision", "comma-separated vision models")
 	visionProvider := fs.String("vision-provider", "ollama", "vision provider: ollama or openai")
 	contextDir := fs.String("context-dir", defaultContextDir(), "directory or file containing local context packs; set empty to disable")
 	runs := fs.Int("runs", 3, "benchmark runs per model")
@@ -125,7 +125,7 @@ func benchmarkVisionModel(ctx context.Context, imagePath, model, provider, ollam
 
 	for i := 0; i < runs; i++ {
 		started := time.Now()
-		events, err := imageEvents(ctx, imagePath, frame, visionOptions{
+		events, _, err := imageEvents(ctx, imagePath, frame, visionOptions{
 			Provider:         provider,
 			Model:            model,
 			OllamaEndpoint:   ollamaEndpoint,

@@ -35,6 +35,8 @@ Adapters convert messy inputs into normalized observations:
 
 The analyzer should not care whether a screen event came from Zoom, screenshots, browser automation, or a replay file.
 
+The architectural rule is simple: use the cheapest reliable extractor first, and reserve the vision model for cases where cheaper extractors do not have enough signal.
+
 ## Current Vision Path
 
 The current implementation has two entry points:
@@ -42,10 +44,11 @@ The current implementation has two entry points:
 - `analyze-image`: analyze one screenshot/image
 - `watch`: repeatedly capture the macOS full screen and analyze each frame
 
-Both paths call a pluggable vision provider and ask for a normalized `screen` event. Supported providers:
+Both paths can call a pluggable extraction provider and ask for a normalized event. Current providers and fast paths include:
 
+- `apple-ocr`: native Apple Vision OCR helper for text-heavy macOS screenshots
 - `openai`: OpenAI Responses API with image input
-- `ollama`: local Ollama `/api/generate` with a vision model such as `llama3.2-vision`
+- `ollama`: local Ollama `/api/generate` with a vision model such as `qwen2.5vl:3b-q4_K_M`
 
 That keeps the rest of the system model-agnostic: policies only see operational events, not raw images.
 
@@ -66,6 +69,7 @@ The next capture milestone is selected-window watching:
 
 The current watcher already includes the first local-control pieces:
 
+- native Apple OCR before VLM fallback on macOS
 - resize before analysis
 - visual hash-based unchanged-frame skipping
 - duplicate alert cooldown

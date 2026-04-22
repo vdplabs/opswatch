@@ -61,7 +61,7 @@ Start Ollama and pull the local vision model before watching:
 
 ```bash
 ollama serve
-ollama pull qwen2.5vl
+ollama pull qwen2.5vl:3b-q4_K_M
 ```
 
 The app is currently unsigned and not notarized. macOS may block it on first open. To allow it:

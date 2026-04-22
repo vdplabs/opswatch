@@ -29,9 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let windowsMenu = NSMenu()
     private var selectedWindow: WatchWindow?
     private var watcher: Process?
+    private var verifier: Process?
     private var selectedItem = NSMenuItem(title: "Selected: none", action: nil, keyEquivalent: "")
     private var startItem = NSMenuItem(title: "Start Watching", action: #selector(startWatching), keyEquivalent: "s")
     private var stopItem = NSMenuItem(title: "Stop Watching", action: #selector(stopWatching), keyEquivalent: "x")
+    private var verifyItem = NSMenuItem(title: "Verify Current", action: #selector(verifyCurrent), keyEquivalent: "v")
     private var settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
     private var checkSetupItem = NSMenuItem(title: "Check Setup", action: #selector(checkSetup), keyEquivalent: "d")
     private var logItem = NSMenuItem(title: "Open Log", action: #selector(openLog), keyEquivalent: "l")
@@ -45,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         setStatus(.idle)
         configureMenu()
+        syncMenuState()
         refreshWindows()
     }
 
@@ -64,12 +67,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startItem.target = self
         stopItem.target = self
+        verifyItem.target = self
         stopItem.isEnabled = false
+        verifyItem.isEnabled = false
         settingsItem.target = self
         checkSetupItem.target = self
         logItem.target = self
         menu.addItem(startItem)
         menu.addItem(stopItem)
+        menu.addItem(verifyItem)
         menu.addItem(settingsItem)
         menu.addItem(checkSetupItem)
         menu.addItem(logItem)
@@ -109,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if watcher == nil {
             setStatus(.selected)
         }
+        syncMenuState()
     }
 
     @objc private func startWatching() {
@@ -123,16 +130,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setStatus(.starting)
 
         let command = opswatchCommand()
-        let process = Process()
-        process.executableURL = command.executableURL
-        process.currentDirectoryURL = command.currentDirectoryURL
-        process.environment = appEnvironment()
         var arguments = command.argumentsPrefix + [
             "watch",
             "--vision-provider", settings.visionProvider,
             "--model", settings.model,
             "--interval", settings.interval,
             "--window-id", "\(selectedWindow.id)",
+            "--window-owner", selectedWindow.owner,
+            "--window-title", selectedWindow.title,
             "--max-image-dimension", settings.maxImageDimension,
             "--ollama-num-predict", settings.ollamaNumPredict,
             "--alert-cooldown", settings.alertCooldown,
@@ -145,42 +150,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appendOptionalFlag("--intent", settings.intent, to: &arguments)
         appendOptionalFlag("--expected-action", settings.expectedAction, to: &arguments)
         appendOptionalFlag("--protected-domain", settings.protectedDomain, to: &arguments)
-        process.arguments = arguments
-
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
         do {
-            logHandle = try FileHandle(forWritingTo: logURL)
-            try logHandle?.seekToEnd()
-        } catch {
-            selectedItem.title = "Log error: \(error.localizedDescription)"
-            return
-        }
-        process.standardOutput = logHandle
-        process.standardError = logHandle
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(watcherDidTerminate(_:)),
-            name: Process.didTerminateNotification,
-            object: process
-        )
-
-        do {
-            try process.run()
-            watcher = process
-            startItem.isEnabled = false
-            stopItem.isEnabled = true
-            setStatus(.watching)
-            NSWorkspace.shared.open(logURL)
-        } catch {
-            NotificationCenter.default.removeObserver(
+            let process = try makeLoggedProcess(command: command, arguments: arguments)
+            NotificationCenter.default.addObserver(
                 self,
+                selector: #selector(watcherDidTerminate(_:)),
                 name: Process.didTerminateNotification,
                 object: process
             )
+            try process.run()
+            watcher = process
+            setStatus(.watching)
+            syncMenuState()
+            NSWorkspace.shared.open(logURL)
+        } catch {
             selectedItem.title = "Start failed: \(error.localizedDescription)"
             setStatus(.error)
-            try? logHandle?.close()
-            logHandle = nil
+            closeLogHandle()
         }
     }
 
@@ -195,11 +181,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         watcher = nil
-        startItem.isEnabled = true
-        stopItem.isEnabled = false
         setStatus(selectedWindow == nil ? .idle : .selected)
-        try? logHandle?.close()
-        logHandle = nil
+        syncMenuState()
+        closeLogHandle()
     }
 
     @objc private func watcherDidTerminate(_ notification: Notification) {
@@ -213,11 +197,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: terminatedProcess
         )
         watcher = nil
-        startItem.isEnabled = true
-        stopItem.isEnabled = false
         setStatus(terminatedProcess.terminationStatus == 0 ? .selected : .stoppedUnexpectedly)
-        try? logHandle?.close()
-        logHandle = nil
+        syncMenuState()
+        closeLogHandle()
+    }
+
+    @objc private func verifyCurrent() {
+        guard watcher == nil else {
+            selectedItem.title = "Stop watching before verification"
+            setStatus(.watching)
+            return
+        }
+        guard verifier == nil else {
+            return
+        }
+        guard let selectedWindow else {
+            selectedItem.title = "Select a window first"
+            setStatus(.needsWindow)
+            return
+        }
+        setStatus(.starting)
+
+        let command = opswatchCommand()
+        var arguments = command.argumentsPrefix + [
+            "watch",
+            "--vision-provider", settings.visionProvider,
+            "--model", settings.model,
+            "--window-id", "\(selectedWindow.id)",
+            "--window-owner", selectedWindow.owner,
+            "--window-title", selectedWindow.title,
+            "--max-image-dimension", settings.maxImageDimension,
+            "--ollama-num-predict", settings.ollamaNumPredict,
+            "--environment", settings.environment,
+            "--context-dir", settings.contextDir,
+            "--notify",
+            "--verbose",
+            "--once"
+        ]
+        appendOptionalFlag("--intent", settings.intent, to: &arguments)
+        appendOptionalFlag("--expected-action", settings.expectedAction, to: &arguments)
+        appendOptionalFlag("--protected-domain", settings.protectedDomain, to: &arguments)
+
+        do {
+            let process = try makeLoggedProcess(command: command, arguments: arguments)
+            process.terminationHandler = { [weak self] _ in
+                Task { @MainActor in
+                    self?.verifier = nil
+                    if self?.watcher == nil {
+                        self?.setStatus(self?.selectedWindow == nil ? .idle : .selected)
+                    }
+                    self?.syncMenuState()
+                    self?.closeLogHandle()
+                }
+            }
+            try process.run()
+            verifier = process
+            selectedItem.title = "Selected: \(selectedWindow.label) (verifying)"
+            syncMenuState()
+            NSWorkspace.shared.open(logURL)
+        } catch {
+            selectedItem.title = "Verify failed: \(error.localizedDescription)"
+            setStatus(.error)
+            syncMenuState()
+            closeLogHandle()
+        }
     }
 
     @objc private func openLog() {
@@ -293,6 +336,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             environment["PATH"] = defaultPath
         }
+        if let bundledOCR = Bundle.main.url(forResource: "OpsWatchOCR", withExtension: nil),
+           FileManager.default.isExecutableFile(atPath: bundledOCR.path) {
+            environment["OPSWATCH_OCR_HELPER"] = bundledOCR.path
+        } else {
+            let localCandidates = [
+                "\(settings.root)/macos/OpsWatchBar/.build/debug/OpsWatchOCR",
+                "\(settings.root)/macos/OpsWatchBar/.build/release/OpsWatchOCR",
+            ]
+            if let helper = localCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+                environment["OPSWATCH_OCR_HELPER"] = helper
+            }
+        }
         return environment
     }
 
@@ -331,6 +386,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         arguments.append(flag)
         arguments.append(value)
+    }
+
+    private func makeLoggedProcess(command: LaunchCommand, arguments: [String]) throws -> Process {
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: logURL)
+        try handle.seekToEnd()
+
+        let process = Process()
+        process.executableURL = command.executableURL
+        process.currentDirectoryURL = command.currentDirectoryURL
+        process.environment = appEnvironment()
+        process.arguments = arguments
+        process.standardOutput = handle
+        process.standardError = handle
+        logHandle = handle
+        return process
+    }
+
+    private func closeLogHandle() {
+        try? logHandle?.close()
+        logHandle = nil
+    }
+
+    private func syncMenuState() {
+        let hasSelection = selectedWindow != nil
+        startItem.isEnabled = hasSelection && watcher == nil && verifier == nil
+        stopItem.isEnabled = watcher != nil
+        verifyItem.isEnabled = hasSelection && watcher == nil && verifier == nil
     }
 
     private func setStatus(_ status: WatchStatus) {

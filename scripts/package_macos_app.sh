@@ -25,6 +25,7 @@ swift build \
 
 go build -o "${RESOURCES_DIR}/opswatch" "${ROOT_DIR}/cmd/opswatch"
 cp "${ROOT_DIR}/macos/OpsWatchBar/.build/release/${APP_NAME}" "${MACOS_DIR}/${APP_NAME}"
+cp "${ROOT_DIR}/macos/OpsWatchBar/.build/release/OpsWatchOCR" "${RESOURCES_DIR}/OpsWatchOCR"
 
 cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -57,6 +58,7 @@ PLIST
 
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 chmod +x "${RESOURCES_DIR}/opswatch"
+chmod +x "${RESOURCES_DIR}/OpsWatchOCR"
 
 (
   cd "${DIST_DIR}"

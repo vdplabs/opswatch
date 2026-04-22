@@ -102,7 +102,7 @@ func checkOllama(ctx context.Context, options Options) Check {
 	}
 	model := options.Model
 	if model == "" {
-		model = "llama3.2-vision"
+		model = "qwen2.5vl:3b-q4_K_M"
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

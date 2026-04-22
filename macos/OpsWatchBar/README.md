@@ -10,7 +10,7 @@ Start Ollama and pull a local vision model:
 
 ```bash
 ollama serve
-ollama pull qwen2.5vl
+ollama pull qwen2.5vl:3b-q4_K_M
 ```
 
 For a release install, download `OpsWatchBar-macos-arm64.zip`, unzip it, and move `OpsWatchBar.app` to `/Applications`. The release app includes the `opswatch` CLI and does not require Go or a source checkout.
@@ -19,8 +19,11 @@ For local development, launch the menu bar app:
 
 ```bash
 cd /Users/vishal/go/src/github.com/vdplabs/opswatch/macos/OpsWatchBar
-swift run
+swift build
+swift run OpsWatchBar
 ```
+
+`swift build` ensures the local `OpsWatchOCR` helper is available for the native OCR fast path.
 
 Then:
 
@@ -29,7 +32,7 @@ Then:
 3. Click `Check Setup` to verify Ollama, the model, and macOS capture tools. Local development builds also verify Go and the repo root.
 4. Open `Windows`.
 5. Select the window to watch.
-6. Click `Start Watching`.
+6. Click `Verify Current` to run a one-shot check against the current window contents, or `Start Watching` to keep monitoring.
 
 The log opens automatically and macOS notifications are sent for emitted alerts.
 
@@ -48,8 +51,9 @@ from the bundled CLI in release builds, or `go run ./cmd/opswatch doctor` in loc
 Recommended local performance defaults:
 
 - Repo root: `/Users/vishal/go/src/github.com/vdplabs/opswatch` for local development only
+- Model profile: `Balanced`
 - Vision provider: `ollama`
-- Model: `qwen2.5vl`
+- Model: `qwen2.5vl:3b-q4_K_M`
 - Interval: `10s`
 - Max image dimension: `1000`
 - Ollama num predict: `128`
@@ -68,6 +72,21 @@ export OPSWATCH_CONTEXT_DIR="$HOME/.opswatch/context"
 
 You can also enter these optional fields in `Settings...`. For richer incident context, put YAML or JSON context packs in the context directory. If they are omitted, OpsWatch still watches for high-risk actions such as DNS zone creation and destructive terminal commands.
 
+The Settings window now includes three model profiles:
+
+- `Fast`: `granite3.2-vision`, `768` max dimension, `96` predict tokens
+- `Balanced`: `qwen2.5vl:3b-q4_K_M`, `1000` max dimension, `128` predict tokens
+- `Accurate`: `llama3.2-vision`, `1200` max dimension, `192` predict tokens
+
+Choosing a profile updates the main model and performance fields immediately, and you can still fine-tune them after that.
+
+Useful local tuning notes:
+
+- `qwen2.5vl:3b-q4_K_M` is the current best balanced local model on Apple Silicon for OpsWatch workloads
+- warm runs are meaningfully faster than the first run after restarting Ollama
+- `OLLAMA_FLASH_ATTENTION=1` is worth testing, but it is not the main performance lever
+- native Apple OCR is used before falling back to the VLM when the helper is available
+
 ## Status Indicators
 
 - shield/eye icon plus `OpsWatch` means idle
@@ -83,6 +102,8 @@ Logs are written to:
 ```
 
 The log opens automatically when you click `Start Watching`. The watcher also sends macOS notifications for emitted alerts.
+
+`Verify Current` runs the same analyzer once against the selected window and writes the result to the same log file. It is useful for testing model quality, context, and current policy coverage before starting continuous watching.
 
 ## Permissions
 
@@ -120,7 +141,7 @@ Then clean and rebuild:
 rm -rf .build
 swift package reset
 swift build
-swift run
+swift run OpsWatchBar
 ```
 
 The menu bar app requires macOS 13 or newer. If the Swift compiler and SDK versions do not match, update Xcode from the App Store or Apple Developer downloads, then rerun the build.

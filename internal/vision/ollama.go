@@ -25,7 +25,7 @@ type OllamaClient struct {
 
 func NewOllamaClient(model string, endpoint string, timeout time.Duration) *OllamaClient {
 	if model == "" {
-		model = "llama3.2-vision"
+		model = "qwen2.5vl:3b-q4_K_M"
 	}
 	if endpoint == "" {
 		endpoint = defaultOllamaEndpoint
@@ -58,6 +58,7 @@ func (c *OllamaClient) AnalyzeImage(ctx context.Context, imagePath string, frame
 		Options: map[string]any{
 			"temperature": 0,
 			"num_predict": 256,
+			"num_ctx":     4096,
 		},
 	}
 	for key, value := range c.Options {

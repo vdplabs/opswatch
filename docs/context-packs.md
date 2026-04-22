@@ -37,7 +37,7 @@ Then run with context:
 ```bash
 go run ./cmd/opswatch analyze-image \
   --vision-provider ollama \
-  --model llama3.2-vision \
+  --model qwen2.5vl:3b-q4_K_M \
   --image /path/to/screenshot.png \
   --context-dir ~/.opswatch/context
 ```

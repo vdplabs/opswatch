@@ -37,6 +37,8 @@ type FrameContext struct {
 	ProtectedDomains []string
 	Environment      string
 	Actor            string
+	WindowOwner      string
+	WindowTitle      string
 }
 
 func NewOpenAIClientFromEnv(model string) (*OpenAIClient, error) {
@@ -157,27 +159,33 @@ type responsesContent struct {
 
 func buildPrompt(frame FrameContext) string {
 	var b strings.Builder
-	b.WriteString("You are OpsWatch, a live incident change witness. Analyze this screenshot from an incident bridge.\n")
-	b.WriteString("Return only one JSON object with fields: source, text, context.\n")
-	b.WriteString("Use source=\"screen\". The text field should be a concise description of the operational action visible on screen.\n")
-	b.WriteString("The context object should include any known action, resource_type, domain, environment, app, account, region, command, and risk_hint values. Use empty strings only when unknown.\n")
-	b.WriteString("Focus on cloud consoles, DNS pages, terminals, Terraform, Kubernetes, CI/CD, feature flags, databases, load balancers, and destructive or high-blast-radius changes.\n")
-	b.WriteString("If the screen is not operationally relevant, still summarize it with app and risk_hint=\"none\".\n")
+	b.WriteString("You are OpsWatch. Analyze one operations screenshot.\n")
+	b.WriteString("Return only one compact JSON object with keys: source, text, context.\n")
+	b.WriteString("Set source to \"screen\".\n")
+	b.WriteString("Keep text under 16 words and describe only the visible action.\n")
+	b.WriteString("Context may include only these keys when known: action, resource_type, domain, environment, app, account, region, command, risk_hint.\n")
+	b.WriteString("Omit unknown keys. Do not add prose. Do not use markdown.\n")
+	b.WriteString("Focus on terminals, cloud consoles, Terraform, Kubernetes, CI/CD, databases, DNS, networking, IAM, and destructive changes.\n")
+	b.WriteString("If nothing operational is visible, return risk_hint=\"none\" and app when obvious.\n")
 	if frame.Intent != "" {
-		b.WriteString("\nCurrent stated intent: ")
+		b.WriteString("Intent: ")
 		b.WriteString(frame.Intent)
+		b.WriteByte('\n')
 	}
 	if frame.ExpectedAction != "" {
-		b.WriteString("\nExpected runbook action: ")
+		b.WriteString("Expected action: ")
 		b.WriteString(frame.ExpectedAction)
+		b.WriteByte('\n')
 	}
 	if frame.Environment != "" {
-		b.WriteString("\nKnown environment: ")
+		b.WriteString("Environment: ")
 		b.WriteString(frame.Environment)
+		b.WriteByte('\n')
 	}
 	if len(frame.ProtectedDomains) > 0 {
-		b.WriteString("\nProtected domains: ")
+		b.WriteString("Protected domains: ")
 		b.WriteString(strings.Join(frame.ProtectedDomains, ", "))
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
@@ -238,6 +246,10 @@ func parseVisionEvent(output string) (domain.Event, error) {
 	cleaned = strings.TrimSuffix(cleaned, "```")
 	cleaned = strings.TrimSpace(cleaned)
 
+	if repaired, ok := repairVisionJSON(cleaned); ok {
+		cleaned = repaired
+	}
+
 	var raw struct {
 		Source  domain.Source     `json:"source"`
 		Text    string            `json:"text"`
@@ -265,4 +277,57 @@ func parseVisionEvent(output string) (domain.Event, error) {
 		Text:      raw.Text,
 		Context:   raw.Context,
 	}, nil
+}
+
+func repairVisionJSON(input string) (string, bool) {
+	if input == "" {
+		return input, false
+	}
+
+	var builder strings.Builder
+	inString := false
+	escaping := false
+	braceDepth := 0
+
+	for _, r := range input {
+		builder.WriteRune(r)
+		if escaping {
+			escaping = false
+			continue
+		}
+		if r == '\\' && inString {
+			escaping = true
+			continue
+		}
+		if r == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch r {
+		case '{':
+			braceDepth++
+		case '}':
+			if braceDepth > 0 {
+				braceDepth--
+			}
+		}
+	}
+
+	repaired := strings.TrimSpace(builder.String())
+	if strings.HasSuffix(repaired, ":") || strings.HasSuffix(repaired, ",") {
+		repaired = strings.TrimRight(repaired, ":, \n\r\t")
+	}
+	if inString {
+		repaired += `"`
+	}
+	for i := 0; i < braceDepth; i++ {
+		repaired += "}"
+	}
+	if repaired == input {
+		return input, false
+	}
+	return repaired, true
 }

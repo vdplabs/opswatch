@@ -1,6 +1,17 @@
 import Foundation
 
+enum AppProfile: String, CaseIterable {
+    case fast
+    case balanced
+    case accurate
+
+    var label: String {
+        rawValue.capitalized
+    }
+}
+
 struct AppSettings {
+    var profile: String
     var root: String
     var visionProvider: String
     var model: String
@@ -16,13 +27,14 @@ struct AppSettings {
     var protectedDomain: String
 
     static let defaults = AppSettings(
+        profile: AppProfile.balanced.rawValue,
         root: "/Users/vishal/go/src/github.com/vdplabs/opswatch",
         visionProvider: "ollama",
-        model: "qwen2.5vl",
-        interval: "10s",
+        model: "qwen2.5vl:3b-q4_K_M",
+        interval: "2s",
         maxImageDimension: "1000",
         ollamaNumPredict: "128",
-        minAnalysisInterval: "30s",
+        minAnalysisInterval: "5s",
         alertCooldown: "2m",
         environment: "prod",
         contextDir: "\(NSHomeDirectory())/.opswatch/context",
@@ -34,7 +46,8 @@ struct AppSettings {
     static func load() -> AppSettings {
         let defaultsStore = UserDefaults.standard
         let fallback = AppSettings.defaults
-        return AppSettings(
+        var settings = AppSettings(
+            profile: value("profile", env: "OPSWATCH_PROFILE", fallback: fallback.profile, defaultsStore: defaultsStore),
             root: value("root", env: "OPSWATCH_ROOT", fallback: fallback.root, defaultsStore: defaultsStore),
             visionProvider: value("visionProvider", env: "OPSWATCH_VISION_PROVIDER", fallback: fallback.visionProvider, defaultsStore: defaultsStore),
             model: value("model", env: "OPSWATCH_MODEL", fallback: fallback.model, defaultsStore: defaultsStore),
@@ -49,10 +62,13 @@ struct AppSettings {
             expectedAction: value("expectedAction", env: "OPSWATCH_EXPECTED_ACTION", fallback: fallback.expectedAction, defaultsStore: defaultsStore),
             protectedDomain: value("protectedDomain", env: "OPSWATCH_PROTECTED_DOMAIN", fallback: fallback.protectedDomain, defaultsStore: defaultsStore)
         )
+        settings = settings.normalizedProfile()
+        return settings
     }
 
     func save() {
         let defaultsStore = UserDefaults.standard
+        defaultsStore.set(profile, forKey: "profile")
         defaultsStore.set(root, forKey: "root")
         defaultsStore.set(visionProvider, forKey: "visionProvider")
         defaultsStore.set(model, forKey: "model")
@@ -74,5 +90,39 @@ struct AppSettings {
         }
         let envValue = ProcessInfo.processInfo.environment[env] ?? ""
         return envValue.isEmpty ? fallback : envValue
+    }
+
+    func normalizedProfile() -> AppSettings {
+        guard let preset = AppProfile(rawValue: profile.lowercased()) else {
+            return applying(profile: .balanced)
+        }
+        return applying(profile: preset)
+    }
+
+    func applying(profile preset: AppProfile) -> AppSettings {
+        var updated = self
+        updated.profile = preset.rawValue
+        updated.visionProvider = "ollama"
+        switch preset {
+        case .fast:
+            updated.model = "granite3.2-vision"
+            updated.maxImageDimension = "768"
+            updated.ollamaNumPredict = "96"
+            updated.interval = "2s"
+            updated.minAnalysisInterval = "4s"
+        case .balanced:
+            updated.model = "qwen2.5vl:3b-q4_K_M"
+            updated.maxImageDimension = "1000"
+            updated.ollamaNumPredict = "128"
+            updated.interval = "2s"
+            updated.minAnalysisInterval = "5s"
+        case .accurate:
+            updated.model = "llama3.2-vision"
+            updated.maxImageDimension = "1200"
+            updated.ollamaNumPredict = "192"
+            updated.interval = "4s"
+            updated.minAnalysisInterval = "10s"
+        }
+        return updated
     }
 }
