@@ -39,6 +39,7 @@ This repo currently includes:
 
 ```bash
 go test ./...
+go run ./cmd/opswatch doctor --vision-provider ollama --model llama3.2-vision --repo-root .
 go run ./cmd/opswatch analyze --events examples/dns_incident.jsonl
 ```
 
@@ -138,14 +139,59 @@ export OPSWATCH_PROTECTED_DOMAIN=example.com
 
 The macOS companion lives in `macos/OpsWatchBar`. It lists visible windows, lets you select one, and starts/stops OpsWatch from the menu bar.
 
+Downloadable builds are published from GitHub Releases. See [docs/releases.md](docs/releases.md) for release artifacts and packaging.
+
+### Menu Bar Quickstart
+
+Start Ollama and pull the local vision model:
+
 ```bash
-cd macos/OpsWatchBar
-OPSWATCH_ROOT=/Users/vishal/go/src/github.com/vdplabs/opswatch swift run
+ollama serve
+ollama pull llama3.2-vision
 ```
+
+For the easiest path, download `OpsWatchBar-macos.zip` from GitHub Releases, unzip it, and move `OpsWatchBar.app` to `/Applications`. The app bundle includes the `opswatch` CLI, so you do not need a Go checkout for the menu bar app.
+
+For local development, launch the menu bar app with Swift:
+
+```bash
+cd /Users/vishal/go/src/github.com/vdplabs/opswatch/macos/OpsWatchBar
+swift run
+```
+
+Then use the menu bar:
+
+1. Click `OpsWatch`.
+2. Open `Settings...` and confirm the model, timing, and environment. The repo root is only used by local `swift run` development builds.
+3. Click `Check Setup` to verify Ollama, the model, and macOS capture tools. Local development builds also verify Go and the repo root.
+4. Open `Windows`.
+5. Select the browser, terminal, Zoom, or console window to watch.
+6. Click `Start Watching`.
+7. Keep the automatically opened log window visible.
+
+The menu bar status indicators are:
+
+- `OpsWatch` means idle
+- `OpsWatch ◦` means a window is selected
+- `OpsWatch …` means watcher is starting
+- `OpsWatch ●` means watching
+- `OpsWatch !` means attention needed
+
+Optional incident context makes alerts more specific. You can set these in `Settings...`:
+
+```bash
+export OPSWATCH_INTENT="Add a CNAME record for api.example.com"
+export OPSWATCH_EXPECTED_ACTION="add CNAME record in existing hosted zone"
+export OPSWATCH_PROTECTED_DOMAIN=example.com
+```
+
+Without these optional values, OpsWatch still emits baseline high-risk warnings such as DNS zone creation, destructive terminal commands, IAM changes, network edge changes, infra apply/deploy actions, and broad-scope operations.
 
 Logs are written to `/tmp/opswatch-menubar.log`. macOS may require Screen Recording permission for Terminal, Swift, or the packaged app.
 
 When you click `Start Watching`, the menu bar app opens the log file immediately and passes `--notify` to the watcher so alerts also appear through macOS notifications.
+
+If `swift run` fails on another Mac with `Invalid manifest` or `undefined symbols for architecture arm64`, see [macos/OpsWatchBar/README.md](macos/OpsWatchBar/README.md#troubleshooting-swift) for Xcode/SwiftPM cleanup steps.
 
 ## Event Model
 

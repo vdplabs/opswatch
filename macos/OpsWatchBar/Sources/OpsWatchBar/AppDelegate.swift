@@ -17,6 +17,13 @@ struct WatchWindow {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private struct LaunchCommand {
+        let executableURL: URL
+        let currentDirectoryURL: URL?
+        let argumentsPrefix: [String]
+        let usesRepoCheckout: Bool
+    }
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let windowsMenu = NSMenu()
@@ -25,10 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var selectedItem = NSMenuItem(title: "Selected: none", action: nil, keyEquivalent: "")
     private var startItem = NSMenuItem(title: "Start Watching", action: #selector(startWatching), keyEquivalent: "s")
     private var stopItem = NSMenuItem(title: "Stop Watching", action: #selector(stopWatching), keyEquivalent: "x")
+    private var settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+    private var checkSetupItem = NSMenuItem(title: "Check Setup", action: #selector(checkSetup), keyEquivalent: "d")
     private var logItem = NSMenuItem(title: "Open Log", action: #selector(openLog), keyEquivalent: "l")
     private var statusItemRow = NSMenuItem(title: "Status: idle", action: nil, keyEquivalent: "")
     private let logURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("opswatch-menubar.log")
     private var logHandle: FileHandle?
+    private var settings = AppSettings.load()
+    private var settingsWindowController: SettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -54,9 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startItem.target = self
         stopItem.target = self
         stopItem.isEnabled = false
+        settingsItem.target = self
+        checkSetupItem.target = self
         logItem.target = self
         menu.addItem(startItem)
         menu.addItem(stopItem)
+        menu.addItem(settingsItem)
+        menu.addItem(checkSetupItem)
         menu.addItem(logItem)
 
         menu.addItem(.separator())
@@ -107,27 +122,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         setStatus(.starting)
 
-        let root = opswatchRoot()
+        let command = opswatchCommand()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.currentDirectoryURL = root
-        var arguments = [
-            "go", "run", "./cmd/opswatch", "watch",
-            "--vision-provider", env("OPSWATCH_VISION_PROVIDER", "ollama"),
-            "--model", env("OPSWATCH_MODEL", "llama3.2-vision"),
-            "--interval", env("OPSWATCH_INTERVAL", "10s"),
+        process.executableURL = command.executableURL
+        process.currentDirectoryURL = command.currentDirectoryURL
+        process.environment = appEnvironment()
+        var arguments = command.argumentsPrefix + [
+            "watch",
+            "--vision-provider", settings.visionProvider,
+            "--model", settings.model,
+            "--interval", settings.interval,
             "--window-id", "\(selectedWindow.id)",
-            "--max-image-dimension", env("OPSWATCH_MAX_IMAGE_DIMENSION", "1000"),
-            "--ollama-num-predict", env("OPSWATCH_OLLAMA_NUM_PREDICT", "128"),
-            "--alert-cooldown", env("OPSWATCH_ALERT_COOLDOWN", "2m"),
-            "--min-analysis-interval", env("OPSWATCH_MIN_ANALYSIS_INTERVAL", "30s"),
-            "--environment", env("OPSWATCH_ENVIRONMENT", "prod"),
+            "--max-image-dimension", settings.maxImageDimension,
+            "--ollama-num-predict", settings.ollamaNumPredict,
+            "--alert-cooldown", settings.alertCooldown,
+            "--min-analysis-interval", settings.minAnalysisInterval,
+            "--environment", settings.environment,
             "--notify",
             "--verbose"
         ]
-        appendOptionalFlag("--intent", envOptional("OPSWATCH_INTENT"), to: &arguments)
-        appendOptionalFlag("--expected-action", envOptional("OPSWATCH_EXPECTED_ACTION"), to: &arguments)
-        appendOptionalFlag("--protected-domain", envOptional("OPSWATCH_PROTECTED_DOMAIN"), to: &arguments)
+        appendOptionalFlag("--intent", settings.intent, to: &arguments)
+        appendOptionalFlag("--expected-action", settings.expectedAction, to: &arguments)
+        appendOptionalFlag("--protected-domain", settings.protectedDomain, to: &arguments)
         process.arguments = arguments
 
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
@@ -140,21 +156,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         process.standardOutput = logHandle
         process.standardError = logHandle
-        process.terminationHandler = { [weak self] process in
-            Task { @MainActor in
-                guard let self else {
-                    return
-                }
-                if self.watcher === process {
-                    self.watcher = nil
-                    self.startItem.isEnabled = true
-                    self.stopItem.isEnabled = false
-                    self.setStatus(process.terminationStatus == 0 ? .selected : .stoppedUnexpectedly)
-                    try? self.logHandle?.close()
-                    self.logHandle = nil
-                }
-            }
-        }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(watcherDidTerminate(_:)),
+            name: Process.didTerminateNotification,
+            object: process
+        )
 
         do {
             try process.run()
@@ -164,6 +171,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setStatus(.watching)
             NSWorkspace.shared.open(logURL)
         } catch {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: Process.didTerminateNotification,
+                object: process
+            )
             selectedItem.title = "Start failed: \(error.localizedDescription)"
             setStatus(.error)
             try? logHandle?.close()
@@ -172,7 +184,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func stopWatching() {
-        watcher?.terminate()
+        let runningWatcher = watcher
+        runningWatcher?.terminate()
+        if let runningWatcher {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: Process.didTerminateNotification,
+                object: runningWatcher
+            )
+        }
         watcher = nil
         startItem.isEnabled = true
         stopItem.isEnabled = false
@@ -181,8 +201,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logHandle = nil
     }
 
+    @objc private func watcherDidTerminate(_ notification: Notification) {
+        guard let terminatedProcess = notification.object as? Process,
+              watcher === terminatedProcess else {
+            return
+        }
+        NotificationCenter.default.removeObserver(
+            self,
+            name: Process.didTerminateNotification,
+            object: terminatedProcess
+        )
+        watcher = nil
+        startItem.isEnabled = true
+        stopItem.isEnabled = false
+        setStatus(terminatedProcess.terminationStatus == 0 ? .selected : .stoppedUnexpectedly)
+        try? logHandle?.close()
+        logHandle = nil
+    }
+
     @objc private func openLog() {
         NSWorkspace.shared.open(logURL)
+    }
+
+    @objc private func openSettings() {
+        let controller = SettingsWindowController(settings: settings) { [weak self] newSettings in
+            self?.settings = newSettings
+        }
+        settingsWindowController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func checkSetup() {
+        let command = opswatchCommand()
+        let process = Process()
+        process.executableURL = command.executableURL
+        process.currentDirectoryURL = command.currentDirectoryURL
+        process.environment = appEnvironment()
+        var arguments = command.argumentsPrefix + [
+            "doctor",
+            "--vision-provider", settings.visionProvider,
+            "--model", settings.model
+        ]
+        if command.usesRepoCheckout {
+            arguments += ["--repo-root", settings.root]
+        }
+        process.arguments = arguments
+
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        do {
+            let handle = try FileHandle(forWritingTo: logURL)
+            try handle.seekToEnd()
+            process.standardOutput = handle
+            process.standardError = handle
+            process.terminationHandler = { _ in
+                try? handle.close()
+            }
+            try process.run()
+            NSWorkspace.shared.open(logURL)
+        } catch {
+            selectedItem.title = "Doctor failed: \(error.localizedDescription)"
+            setStatus(.error)
+        }
+    }
+
+    private func opswatchCommand() -> LaunchCommand {
+        if let bundledCLI = Bundle.main.url(forResource: "opswatch", withExtension: nil),
+           FileManager.default.isExecutableFile(atPath: bundledCLI.path) {
+            return LaunchCommand(
+                executableURL: bundledCLI,
+                currentDirectoryURL: nil,
+                argumentsPrefix: [],
+                usesRepoCheckout: false
+            )
+        }
+
+        return LaunchCommand(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+            currentDirectoryURL: URL(fileURLWithPath: settings.root),
+            argumentsPrefix: ["go", "run", "./cmd/opswatch"],
+            usesRepoCheckout: true
+        )
+    }
+
+    private func appEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let defaultPath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        if let path = environment["PATH"], !path.isEmpty {
+            environment["PATH"] = "\(defaultPath):\(path)"
+        } else {
+            environment["PATH"] = defaultPath
+        }
+        return environment
     }
 
     @objc private func quit() {
@@ -214,18 +324,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func env(_ key: String, _ fallback: String) -> String {
-        let value = ProcessInfo.processInfo.environment[key] ?? ""
-        return value.isEmpty ? fallback : value
-    }
-
-    private func envOptional(_ key: String) -> String? {
-        let value = ProcessInfo.processInfo.environment[key] ?? ""
-        return value.isEmpty ? nil : value
-    }
-
-    private func appendOptionalFlag(_ flag: String, _ value: String?, to arguments: inout [String]) {
-        guard let value, !value.isEmpty else {
+    private func appendOptionalFlag(_ flag: String, _ value: String, to arguments: inout [String]) {
+        if value.isEmpty {
             return
         }
         arguments.append(flag)
@@ -237,20 +337,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemRow.title = "Status: \(status.description)"
     }
 
-    private func opswatchRoot() -> URL {
-        if let value = ProcessInfo.processInfo.environment["OPSWATCH_ROOT"], !value.isEmpty {
-            return URL(fileURLWithPath: value)
-        }
-
-        var url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        for _ in 0..<5 {
-            if FileManager.default.fileExists(atPath: url.appendingPathComponent("go.mod").path) {
-                return url
-            }
-            url.deleteLastPathComponent()
-        }
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-    }
 }
 
 private enum WatchStatus {
@@ -300,8 +386,3 @@ private enum WatchStatus {
         }
     }
 }
-
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
